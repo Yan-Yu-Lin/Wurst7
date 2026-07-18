@@ -96,6 +96,13 @@ public final class XRayHack extends Hack implements UpdateListener,
 			+ "Does not work when Sodium is installed.\n\n"
 			+ "Remember to restart X-Ray when changing this setting.",
 		0, 0, 0.99, 0.01, ValueDisplay.PERCENTAGE.withLabel(0, "off"));
+
+	private final SliderSetting skeletonLineWidth = new SliderSetting(
+		"Skeleton line width",
+		"Thickness of the wireframe lines in Skeleton style, in pixels.\n\n"
+			+ "Higher values redraw the skeleton multiple times and cost more"
+			+ " GPU time.",
+		2, 1, 4, 1, ValueDisplay.INTEGER.withSuffix("px"));
 	
 	private final String optiFineWarning;
 	private final String renderName =
@@ -116,6 +123,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 		addSetting(ores);
 		addSetting(onlyExposed);
 		addSetting(opacity);
+		addSetting(skeletonLineWidth);
 		optiFineWarning = checkOptiFine();
 	}
 	
@@ -270,6 +278,11 @@ public final class XRayHack extends Hack implements UpdateListener,
 	public boolean isSelectedForXRay(Block block)
 	{
 		return isVisible(block, null);
+	}
+
+	public int getSkeletonLineWidth()
+	{
+		return skeletonLineWidth.getValueI();
 	}
 
 	public boolean isOpacityMode()

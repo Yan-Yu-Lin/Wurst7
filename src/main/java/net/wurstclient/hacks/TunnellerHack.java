@@ -9,7 +9,9 @@ package net.wurstclient.hacks;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.stream.StreamSupport;
 
 import net.minecraft.block.Block;
@@ -46,6 +48,8 @@ import net.wurstclient.settings.EnumSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.settings.SwingHandSetting.SwingHand;
+import net.wurstclient.util.BlockBreaker;
+import net.wurstclient.util.BlockBreaker.BlockBreakingParams;
 import net.wurstclient.util.BlockUtils;
 import net.wurstclient.util.ChatUtils;
 import net.wurstclient.util.EasyVertexBuffer;
@@ -83,6 +87,9 @@ public final class TunnellerHack extends Hack
 	private BlockPos currentBlock;
 	private BlockPos lastTorch;
 	private BlockPos nextTorch;
+	private BlockPos stalledBlock;
+	private int stalledTicks;
+	private static final int STALL_TIMEOUT = 200;
 	
 	public TunnellerHack()
 	{
@@ -125,6 +132,7 @@ public final class TunnellerHack extends Hack
 		length = 0;
 		lastTorch = null;
 		nextTorch = start;
+		resetDiggingState();
 		
 		tasks = new Task[]{new DodgeLiquidTask(), new FillInFloorTask(),
 			new PlaceTorchTask(), new WaitForFallingBlocksTask(),
@@ -141,6 +149,7 @@ public final class TunnellerHack extends Hack
 		EVENTS.remove(RenderListener.class, this);
 		
 		overlay.resetProgress();
+		resetDiggingState();
 		if(currentBlock != null)
 		{
 			MC.interactionManager.breakingBlock = true;
@@ -287,9 +296,25 @@ public final class TunnellerHack extends Hack
 		public abstract void run();
 	}
 	
+	private void resetDiggingState()
+	{
+		resetStallTimer();
+	}
+	
+	private void resetStallTimer()
+	{
+		stalledBlock = null;
+		stalledTicks = 0;
+	}
+	
 	private class DigTunnelTask extends Task
 	{
 		private int maxDistance;
+		private BlockPos trackedBlock;
+		private float lastProgress;
+		private int progressResets;
+		private int clearTicks;
+		private final Map<BlockPos, Integer> restoredBlocks = new HashMap<>();
 		
 		@Override
 		public boolean canRun()
@@ -320,9 +345,9 @@ public final class TunnellerHack extends Hack
 			RegionPos region = RenderUtils.getCameraRegion();
 			Box blockBox = new Box(BlockPos.ORIGIN).contract(0.1)
 				.offset(region.negate().toVec3d());
-			
-			currentBlock = null;
 			ArrayList<Box> boxes = new ArrayList<>();
+			
+			ArrayList<BlockBreakingParams> candidates = new ArrayList<>();
 			for(BlockPos pos : blocks)
 			{
 				if(!BlockUtils.canBeClicked(pos))
@@ -332,12 +357,76 @@ public final class TunnellerHack extends Hack
 					&& BlockUtils.getBlock(pos) instanceof TorchBlock)
 					continue;
 				
-				if(currentBlock == null)
-					currentBlock = pos;
-				
+				BlockBreakingParams params =
+					BlockBreaker.getBlockBreakingParams(pos);
+				if(params != null)
+					candidates.add(params);
 				boxes.add(blockBox.offset(pos));
 			}
 			
+			updateGreenBuffer(boxes);
+			if(candidates.isEmpty())
+			{
+				confirmClearTunnelSegment();
+				return;
+			}
+			
+			if(clearTicks > 0 && trackedBlock != null && candidates.stream()
+				.anyMatch(params -> params.pos().equals(trackedBlock)))
+				restoredBlocks.merge(trackedBlock, 1, Integer::sum);
+			clearTicks = 0;
+			
+			double reach = MC.interactionManager.getReachDistance();
+			double reachSq = reach * reach;
+			BlockBreakingParams target = candidates.stream()
+				.filter(params -> params.distanceSq() <= reachSq)
+				.sorted(BlockBreaker.comparingParams()).findFirst()
+				.orElse(null);
+			
+			if(target == null)
+			{
+				currentBlock = null;
+				MC.interactionManager.cancelBlockBreaking();
+				overlay.resetProgress();
+				walkTowards(base);
+				
+				if(getDistance(player, base) <= 1)
+					stopIfStalled(candidates.get(0).pos());
+				else
+					resetStallTimer();
+				return;
+			}
+			
+			currentBlock = target.pos();
+			WURST.getHax().autoToolHack.equipBestTool(currentBlock, false, true,
+				0);
+			
+			target = BlockBreaker.getBlockBreakingParams(currentBlock);
+			reach = MC.interactionManager.getReachDistance();
+			if(target == null || target.distanceSq() > reach * reach)
+			{
+				currentBlock = null;
+				MC.interactionManager.cancelBlockBreaking();
+				overlay.resetProgress();
+				walkTowards(base);
+				return;
+			}
+			
+			trackBreakingProgress(target);
+			BlockBreaker.breakOneBlock(target);
+			
+			if(MC.player.getAbilities().creativeMode
+				|| BlockUtils.getHardness(currentBlock) >= 1)
+			{
+				overlay.resetProgress();
+				return;
+			}
+			
+			overlay.updateProgress();
+		}
+		
+		private void updateGreenBuffer(ArrayList<Box> boxes)
+		{
 			if(vertexBuffers[1] != null)
 			{
 				vertexBuffers[1].close();
@@ -351,37 +440,78 @@ public final class TunnellerHack extends Hack
 						for(Box box : boxes)
 							RenderUtils.drawOutlinedBox(buffer, box, green);
 					});
-			
-			if(currentBlock == null)
-			{
-				MC.interactionManager.cancelBlockBreaking();
-				overlay.resetProgress();
-				
-				length++;
-				if(limit.getValueI() == 0 || length < limit.getValueI())
-					updateCyanBuffer();
-				else
-				{
-					ChatUtils.message("Tunnel completed.");
-					setEnabled(false);
-				}
-				
-				return;
-			}
-			
-			WURST.getHax().autoToolHack.equipBestTool(currentBlock, false, true,
-				0);
-			breakBlock(currentBlock);
-			
-			if(MC.player.getAbilities().creativeMode
-				|| BlockUtils.getHardness(currentBlock) >= 1)
-			{
-				overlay.resetProgress();
-				return;
-			}
-			
-			overlay.updateProgress();
 		}
+		
+		private void confirmClearTunnelSegment()
+		{
+			currentBlock = null;
+			MC.interactionManager.cancelBlockBreaking();
+			overlay.resetProgress();
+			
+			if(++clearTicks < 5)
+				return;
+			
+			clearTicks = 0;
+			trackedBlock = null;
+			lastProgress = 0;
+			progressResets = 0;
+			restoredBlocks.clear();
+			resetStallTimer();
+			length++;
+			if(limit.getValueI() == 0 || length < limit.getValueI())
+				updateCyanBuffer();
+			else
+			{
+				ChatUtils.message("Tunnel completed.");
+				setEnabled(false);
+			}
+		}
+		
+		private void trackBreakingProgress(BlockBreakingParams target)
+		{
+			if(!target.pos().equals(trackedBlock))
+			{
+				trackedBlock = target.pos();
+				lastProgress = 0;
+				progressResets = 0;
+				resetStallTimer();
+			}
+			
+			float progress = MC.interactionManager.currentBreakingProgress;
+			boolean advanced = progress > lastProgress + 0.001F;
+			if(progress + 0.001F < lastProgress)
+				progressResets++;
+			lastProgress = progress;
+			
+			int restores = restoredBlocks.getOrDefault(target.pos(), 0);
+			if(progressResets >= 3 || restores >= 3)
+				stopIfStalled(target.pos());
+			else if(advanced)
+				resetStallTimer();
+		}
+		
+		private void stopIfStalled(BlockPos pos)
+		{
+			if(!pos.equals(stalledBlock))
+			{
+				stalledBlock = pos;
+				stalledTicks = 0;
+			}
+			
+			if(++stalledTicks < STALL_TIMEOUT)
+				return;
+			
+			ChatUtils.error("Cannot break the block at " + pos.toShortString()
+				+ ". Tunneller stopped instead of retrying forever.");
+			setEnabled(false);
+		}
+	}
+	
+	private void walkTowards(BlockPos base)
+	{
+		Vec3d vec = Vec3d.ofCenter(base);
+		WURST.getRotationFaker().faceVectorClientIgnorePitch(vec);
+		MC.options.forwardKey.setPressed(true);
 	}
 	
 	private class WalkForwardTask extends Task
@@ -399,10 +529,7 @@ public final class TunnellerHack extends Hack
 		public void run()
 		{
 			BlockPos base = start.offset(direction, length);
-			Vec3d vec = Vec3d.ofCenter(base);
-			WURST.getRotationFaker().faceVectorClientIgnorePitch(vec);
-			
-			MC.options.forwardKey.setPressed(true);
+			walkTowards(base);
 		}
 	}
 	

@@ -9,29 +9,46 @@ package net.wurstclient.mixin;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
+
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.RenderLayers;
+import net.minecraft.fluid.FluidState;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.XRayHack;
 
 @Mixin(RenderLayers.class)
 public abstract class RenderLayersMixin
 {
-	/**
-	 * Puts all blocks on the translucent layer if Opacity X-Ray is enabled.
-	 */
-	@Inject(at = @At("HEAD"),
-		method = "getBlockLayer(Lnet/minecraft/block/BlockState;)Lnet/minecraft/client/render/RenderLayer;",
-		cancellable = true)
-	private static void onGetBlockLayer(BlockState state,
-		CallbackInfoReturnable<RenderLayer> cir)
+	@ModifyReturnValue(at = @At("RETURN"),
+		method = "getBlockLayer(Lnet/minecraft/block/BlockState;)Lnet/minecraft/client/render/RenderLayer;")
+	private static RenderLayer onGetBlockLayer(RenderLayer original,
+		BlockState state)
 	{
-		if(!WurstClient.INSTANCE.getHax().xRayHack.isOpacityMode())
-			return;
-		
-		cir.setReturnValue(RenderLayer.getTranslucent());
+		return getXRayLayer(original, state.getBlock());
+	}
+
+	@ModifyReturnValue(at = @At("RETURN"),
+		method = "getFluidLayer(Lnet/minecraft/fluid/FluidState;)Lnet/minecraft/client/render/RenderLayer;")
+	private static RenderLayer onGetFluidLayer(RenderLayer original,
+		FluidState state)
+	{
+		return getXRayLayer(original, state.getBlockState().getBlock());
+	}
+
+	private static RenderLayer getXRayLayer(RenderLayer original, Block block)
+	{
+		XRayHack xray = WurstClient.INSTANCE.getHax().xRayHack;
+		if(xray.isSodiumSkeletonMode())
+			return xray.isSelectedForXRay(block) ? RenderLayer.getTranslucent()
+				: RenderLayer.getCutoutMipped();
+
+		if(xray.isOpacityMode())
+			return RenderLayer.getTranslucent();
+
+		return original;
 	}
 }

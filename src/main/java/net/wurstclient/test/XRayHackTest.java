@@ -11,6 +11,8 @@ import static net.wurstclient.test.WurstClientTestHelper.*;
 
 import java.time.Duration;
 
+import net.fabricmc.loader.api.FabricLoader;
+
 public enum XRayHackTest
 {
 	;
@@ -22,6 +24,7 @@ public enum XRayHackTest
 		clearChat();
 		
 		// Enable X-Ray with default settings
+		runWurstCommand("setmode X-Ray style Normal");
 		runWurstCommand("setcheckbox X-Ray only_show_exposed off");
 		runWurstCommand("setslider X-Ray opacity 0");
 		runWurstCommand("t X-Ray on");
@@ -53,8 +56,21 @@ public enum XRayHackTest
 		runWurstCommand("t X-Ray off");
 		clearChat();
 		
+		if(FabricLoader.getInstance().isModLoaded("sodium"))
+		{
+			// Sodium Skeleton mode
+			runWurstCommand("setmode X-Ray style Skeleton");
+			runWurstCommand("setcheckbox X-Ray only_show_exposed off");
+			runWurstCommand("setslider X-Ray opacity 0");
+			runWurstCommand("t X-Ray on");
+			takeScreenshot("xray_sodium_skeleton", Duration.ofMillis(300));
+			runWurstCommand("t X-Ray off");
+			clearChat();
+		}
+
 		// Clean up
-		runChatCommand("fill ~-7 ~ ~-7 ~7 ~30 ~7 air");
+		runChatCommand("fill ~-7 ~ ~-7 ~7 ~30 ~10 air");
+		runWurstCommand("setmode X-Ray style Normal");
 		runWurstCommand("setcheckbox X-Ray only_show_exposed off");
 		runWurstCommand("setslider X-Ray opacity 0");
 		runWurstCommand("t X-Ray off");
@@ -65,7 +81,10 @@ public enum XRayHackTest
 	{
 		// Stone wall (9 wide, 5 high, 3 deep)
 		runChatCommand("fill ~-5 ~ ~5 ~5 ~5 ~7 stone");
-		
+
+		// Rear wall that Skeleton mode should hide behind the front surface
+		runChatCommand("fill ~-5 ~ ~9 ~5 ~5 ~9 stone");
+
 		// Ores (1 exposed and 1 hidden each)
 		runChatCommand("fill ~-4 ~1 ~5 ~-4 ~1 ~6 minecraft:coal_ore");
 		runChatCommand("fill ~-2 ~1 ~5 ~-2 ~1 ~6 minecraft:iron_ore");

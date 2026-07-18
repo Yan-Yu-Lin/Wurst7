@@ -9,6 +9,7 @@ package net.wurstclient.hacks;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -31,16 +32,24 @@ import net.wurstclient.hack.Hack;
 import net.wurstclient.mixinterface.ISimpleOption;
 import net.wurstclient.settings.BlockListSetting;
 import net.wurstclient.settings.CheckboxSetting;
+import net.wurstclient.settings.EnumSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.util.BlockUtils;
 import net.wurstclient.util.ChatUtils;
+import net.wurstclient.util.SodiumSkeletonRenderState;
+import net.wurstclient.util.text.WText;
 
 @SearchTags({"XRay", "x ray", "OreFinder", "ore finder"})
 public final class XRayHack extends Hack implements UpdateListener,
 	SetOpaqueCubeListener, GetAmbientOcclusionLightLevelListener,
 	ShouldDrawSideListener, RenderBlockEntityListener
 {
+	private final EnumSetting<Style> style = new EnumSetting<>("Style",
+		WText.literal("How non-selected terrain is rendered.\n\n"
+			+ "Remember to restart X-Ray when changing this setting."),
+		Style.values(), Style.NORMAL);
+
 	private final BlockListSetting ores = new BlockListSetting("Ores",
 		"A list of blocks that X-Ray will show. They don't have to be just ores"
 			+ " - you can add any block you want.\n\n"
@@ -91,7 +100,10 @@ public final class XRayHack extends Hack implements UpdateListener,
 	private final String optiFineWarning;
 	private final String renderName =
 		Math.random() < 0.01 ? "X-Wurst" : getName();
-	
+
+	private Style activeStyle = Style.NORMAL;
+	private boolean forceNormalWithoutOpacity;
+	private int shaderCheckTimer;
 	private ArrayList<String> oreNamesCache;
 	private final ThreadLocal<BlockPos.Mutable> mutablePosForExposedCheck =
 		ThreadLocal.withInitial(BlockPos.Mutable::new);
@@ -100,6 +112,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 	{
 		super("X-Ray");
 		setCategory(Category.RENDER);
+		addSetting(style);
 		addSetting(ores);
 		addSetting(onlyExposed);
 		addSetting(opacity);
@@ -115,6 +128,21 @@ public final class XRayHack extends Hack implements UpdateListener,
 	@Override
 	protected void onEnable()
 	{
+		activeStyle = style.getSelected();
+		forceNormalWithoutOpacity = false;
+		shaderCheckTimer = 0;
+		if(activeStyle == Style.SKELETON)
+		{
+			String warning = checkSkeletonSupport();
+			if(warning != null)
+			{
+				activeStyle = Style.NORMAL;
+				forceNormalWithoutOpacity =
+					FabricLoader.getInstance().isModLoaded("sodium");
+				ChatUtils.warning(warning);
+			}
+		}
+
 		// cache block names in case the setting changes while X-Ray is enabled
 		oreNamesCache = new ArrayList<>(ores.getBlockNames());
 		
@@ -142,7 +170,8 @@ public final class XRayHack extends Hack implements UpdateListener,
 		EVENTS.remove(GetAmbientOcclusionLightLevelListener.class, this);
 		EVENTS.remove(ShouldDrawSideListener.class, this);
 		EVENTS.remove(RenderBlockEntityListener.class, this);
-		
+		SodiumSkeletonRenderState.restoreDefaults();
+
 		// reload chunks
 		MC.worldRenderer.reload();
 		
@@ -158,6 +187,20 @@ public final class XRayHack extends Hack implements UpdateListener,
 	{
 		// force gamma to 16 so that ores are bright enough to see
 		ISimpleOption.get(MC.options.getGamma()).forceSetValue(16.0);
+
+		if(!isSkeletonMode() || ++shaderCheckTimer < 20)
+			return;
+
+		shaderCheckTimer = 0;
+		String irisWarning = checkIrisSupport();
+		if(irisWarning == null)
+			return;
+
+		activeStyle = Style.NORMAL;
+		forceNormalWithoutOpacity = true;
+		SodiumSkeletonRenderState.restoreDefaults();
+		ChatUtils.warning(irisWarning);
+		MC.worldRenderer.reload();
 	}
 	
 	@Override
@@ -178,9 +221,9 @@ public final class XRayHack extends Hack implements UpdateListener,
 	{
 		boolean visible =
 			isVisible(event.getState().getBlock(), event.getPos());
-		if(!visible && opacity.getValue() > 0)
+		if(!visible && (isOpacityMode() || isSodiumSkeletonMode()))
 			return;
-		
+
 		event.setRendered(visible);
 	}
 	
@@ -214,16 +257,71 @@ public final class XRayHack extends Hack implements UpdateListener,
 		return false;
 	}
 	
+	public boolean isSkeletonMode()
+	{
+		return isEnabled() && activeStyle == Style.SKELETON;
+	}
+
+	public boolean isSodiumSkeletonMode()
+	{
+		return isSkeletonMode() && SodiumSkeletonRenderState.areHooksReady();
+	}
+
+	public boolean isSelectedForXRay(Block block)
+	{
+		return isVisible(block, null);
+	}
+
 	public boolean isOpacityMode()
 	{
-		return isEnabled() && opacity.getValue() > 0;
+		return isEnabled() && activeStyle == Style.NORMAL
+			&& !forceNormalWithoutOpacity && opacity.getValue() > 0;
 	}
-	
+
 	public int getOpacityColorMask()
 	{
 		return (int)(opacity.getValue() * 255) << 24 | 0xFFFFFF;
 	}
 	
+	private String checkSkeletonSupport()
+	{
+		FabricLoader loader = FabricLoader.getInstance();
+		Optional<ModContainer> sodium = loader.getModContainer("sodium");
+		if(sodium.isEmpty())
+			return "Skeleton X-Ray requires Sodium 0.5.11.";
+
+		String version =
+			sodium.get().getMetadata().getVersion().getFriendlyString();
+		if(!"0.5.11+mc1.20.1".equals(version))
+			return "Skeleton X-Ray only supports Sodium 0.5.11 on Minecraft 1.20.1. Found Sodium "
+				+ version + ".";
+
+		return checkIrisSupport();
+	}
+
+	private String checkIrisSupport()
+	{
+		if(!FabricLoader.getInstance().isModLoaded("iris"))
+			return null;
+
+		try
+		{
+			Class<?> irisApiClass =
+				Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+			Object irisApi = irisApiClass.getMethod("getInstance").invoke(null);
+			boolean shaderPackInUse = (boolean)irisApiClass
+				.getMethod("isShaderPackInUse").invoke(irisApi);
+			if(shaderPackInUse)
+				return "Skeleton X-Ray does not support active Iris shader packs yet. Disable the shader pack and restart X-Ray.";
+
+		}catch(ReflectiveOperationException e)
+		{
+			return "Skeleton X-Ray could not verify the Iris shader state. It has fallen back to Normal mode.";
+		}
+
+		return null;
+	}
+
 	/**
 	 * Checks if OptiFine/OptiFabric is installed and returns a warning message
 	 * if it is.
@@ -245,6 +343,25 @@ public final class XRayHack extends Hack implements UpdateListener,
 	{
 		MC.setScreen(new EditBlockListScreen(prevScreen, ores));
 	}
-	
+
+	private enum Style
+	{
+		NORMAL("Normal"),
+		SKELETON("Skeleton");
+
+		private final String name;
+
+		private Style(String name)
+		{
+			this.name = name;
+		}
+
+		@Override
+		public String toString()
+		{
+			return name;
+		}
+	}
+
 	// See AbstractBlockRenderContextMixin, RenderLayersMixin
 }

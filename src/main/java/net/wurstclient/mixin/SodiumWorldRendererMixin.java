@@ -7,7 +7,6 @@
  */
 package net.wurstclient.mixin;
 
-import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.Shadow;
@@ -18,9 +17,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import me.jellysquid.mods.sodium.client.render.chunk.RenderSectionManager;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
+import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.util.Window;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.XRayHack;
+import net.wurstclient.util.SkeletonPostRenderer;
 import net.wurstclient.util.SodiumSkeletonRenderState;
 import net.wurstclient.util.SodiumSkeletonRenderState.Phase;
 
@@ -30,18 +32,14 @@ import net.wurstclient.util.SodiumSkeletonRenderState.Phase;
 	remap = false)
 public abstract class SodiumWorldRendererMixin
 {
-	/**
-	 * Screen-space jitter patterns for each line width. macOS core-profile
-	 * OpenGL clamps GL line width to 1px, so thicker skeleton lines are
-	 * achieved by redrawing the line pass at small pixel offsets.
-	 */
-	private static final int[][][] WURST_LINE_OFFSETS =
-		{{{0, 0}}, {{0, 0}, {1, 0}, {0, 1}},
-			{{0, 0}, {1, 0}, {0, 1}, {-1, 0}, {0, -1}},
-			{{0, 0}, {1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 1}, {-1, -1}}};
-
 	@Shadow
 	private RenderSectionManager renderSectionManager;
+
+	@Inject(at = @At("RETURN"), method = "<init>", require = 0)
+	private void onConstructed(MinecraftClient client, CallbackInfo ci)
+	{
+		SodiumSkeletonRenderState.markWorldRendererHookPresent();
+	}
 
 	@Inject(at = @At("HEAD"), method = "drawChunkLayer", cancellable = true,
 		require = 0)
@@ -55,8 +53,9 @@ public abstract class SodiumWorldRendererMixin
 
 		if(renderLayer == RenderLayer.getSolid())
 		{
-			render(Phase.DEPTH, matrices, x, y, z);
-			renderJitteredLines(matrices, x, y, z);
+			// The skeleton grid is deliberately deferred to the translucent
+			// layer so that it composites on top of the through-wall ores
+			// instead of being painted over by them.
 			ci.cancel();
 			return;
 		}
@@ -66,6 +65,18 @@ public abstract class SodiumWorldRendererMixin
 			SodiumSkeletonRenderState.run(Phase.ORES,
 				() -> renderSectionManager.renderLayer(matrices,
 					DefaultTerrainRenderPasses.TRANSLUCENT, x, y, z));
+
+			XRayHack xRay = WurstClient.INSTANCE.getHax().xRayHack;
+			CameraTransform camera = new CameraTransform(x, y, z);
+			boolean rendered = SkeletonPostRenderer.render(matrices.projection(),
+				matrices.modelView(), camera.intX, camera.intY, camera.intZ,
+				camera.fracX, camera.fracY, camera.fracZ,
+				() -> renderOffscreenDepth(matrices, x, y, z),
+				xRay.getSkeletonColor(), xRay.getSkeletonLineWidth(),
+				xRay.getSkeletonOutline());
+			if(!rendered)
+				renderFallback(matrices, x, y, z);
+
 			ci.cancel();
 		}
 	}
@@ -79,37 +90,25 @@ public abstract class SodiumWorldRendererMixin
 	}
 
 	/**
-	 * Draws the skeleton line pass one or more times with sub-pixel projection
-	 * offsets to simulate thicker lines on platforms that clamp GL line width.
+	 * Renders both the non-ore terrain and the selected ore blocks into the
+	 * offscreen depth buffer, so embedded ores don't act as see-through holes
+	 * in the skeleton's occlusion surface.
 	 */
-	private void renderJitteredLines(ChunkRenderMatrices matrices, double x,
+	private void renderOffscreenDepth(ChunkRenderMatrices matrices, double x,
 		double y, double z)
 	{
-		int lineWidth =
-			WurstClient.INSTANCE.getHax().xRayHack.getSkeletonLineWidth();
-		int index = Math.min(Math.max(lineWidth, 1), WURST_LINE_OFFSETS.length)
-			- 1;
-		int[][] offsets = WURST_LINE_OFFSETS[index];
+		SodiumSkeletonRenderState.run(Phase.DEPTH_OFFSCREEN, () -> {
+			renderSectionManager.renderLayer(matrices,
+				DefaultTerrainRenderPasses.CUTOUT, x, y, z);
+			renderSectionManager.renderLayer(matrices,
+				DefaultTerrainRenderPasses.TRANSLUCENT, x, y, z);
+		});
+	}
 
-		Window window = WurstClient.MC.getWindow();
-		float pixelX = 2F / Math.max(1, window.getFramebufferWidth());
-		float pixelY = 2F / Math.max(1, window.getFramebufferHeight());
-
-		for(int[] offset : offsets)
-		{
-			ChunkRenderMatrices jittered = matrices;
-			if(offset[0] != 0 || offset[1] != 0)
-			{
-				// Shift the projection's z-column so the offset is a uniform
-				// screen-space jitter regardless of distance (clip.w == -z).
-				Matrix4f projection = new Matrix4f(matrices.projection());
-				projection.m20(projection.m20() - offset[0] * pixelX);
-				projection.m21(projection.m21() - offset[1] * pixelY);
-				jittered =
-					new ChunkRenderMatrices(projection, matrices.modelView());
-			}
-
-			render(Phase.LINES, jittered, x, y, z);
-		}
+	private void renderFallback(ChunkRenderMatrices matrices, double x,
+		double y, double z)
+	{
+		render(Phase.DEPTH, matrices, x, y, z);
+		render(Phase.LINES, matrices, x, y, z);
 	}
 }

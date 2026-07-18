@@ -62,6 +62,10 @@ public enum SodiumSkeletonRenderState
 				applyDepthPhase();
 				break;
 
+			case DEPTH_OFFSCREEN:
+				applyOffscreenDepthPhase();
+				break;
+
 			case LINES:
 				applyLinePhase();
 				break;
@@ -84,6 +88,17 @@ public enum SodiumSkeletonRenderState
 		RenderSystem.colorMask(false, false, false, false);
 		RenderSystem.enablePolygonOffset();
 		RenderSystem.polygonOffset(1, 1);
+	}
+
+	private static void applyOffscreenDepthPhase()
+	{
+		RenderSystem.polygonMode(GlConst.GL_FRONT_AND_BACK, GlConst.GL_FILL);
+		RenderSystem.enableDepthTest();
+		RenderSystem.depthFunc(GlConst.GL_LEQUAL);
+		RenderSystem.depthMask(true);
+		RenderSystem.colorMask(false, false, false, false);
+		RenderSystem.disablePolygonOffset();
+		RenderSystem.polygonOffset(0, 0);
 	}
 
 	private static void applyLinePhase()
@@ -124,6 +139,7 @@ public enum SodiumSkeletonRenderState
 	{
 		NONE,
 		DEPTH,
+		DEPTH_OFFSCREEN,
 		LINES,
 		ORES
 	}

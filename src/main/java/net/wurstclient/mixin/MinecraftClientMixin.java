@@ -25,6 +25,7 @@ import com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.WindowEventHandler;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.util.ProfileKeys;
@@ -42,6 +43,7 @@ import net.wurstclient.events.RightClickListener.RightClickEvent;
 import net.wurstclient.mixinterface.IClientPlayerEntity;
 import net.wurstclient.mixinterface.IClientPlayerInteractionManager;
 import net.wurstclient.mixinterface.IMinecraftClient;
+import net.wurstclient.util.SkeletonPostRenderer;
 
 @Mixin(MinecraftClient.class)
 public abstract class MinecraftClientMixin
@@ -69,7 +71,19 @@ public abstract class MinecraftClientMixin
 	{
 		super(name);
 	}
-	
+
+	@Inject(at = @At("HEAD"), method = "joinWorld")
+	private void onJoinWorld(ClientWorld world, CallbackInfo ci)
+	{
+		SkeletonPostRenderer.closeFramebuffer();
+	}
+
+	@Inject(at = @At("HEAD"), method = "disconnect(Lnet/minecraft/client/gui/screen/Screen;)V")
+	private void onDisconnect(Screen screen, CallbackInfo ci)
+	{
+		SkeletonPostRenderer.closeFramebuffer();
+	}
+
 	/**
 	 * Runs just before {@link MinecraftClient#handleInputEvents()}, bypassing
 	 * the <code>overlay == null && currentScreen == null</code> check in

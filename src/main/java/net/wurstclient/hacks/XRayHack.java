@@ -7,6 +7,7 @@
  */
 package net.wurstclient.hacks;
 
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Optional;
@@ -32,11 +33,13 @@ import net.wurstclient.hack.Hack;
 import net.wurstclient.mixinterface.ISimpleOption;
 import net.wurstclient.settings.BlockListSetting;
 import net.wurstclient.settings.CheckboxSetting;
+import net.wurstclient.settings.ColorSetting;
 import net.wurstclient.settings.EnumSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.util.BlockUtils;
 import net.wurstclient.util.ChatUtils;
+import net.wurstclient.util.SkeletonPostRenderer;
 import net.wurstclient.util.SodiumSkeletonRenderState;
 import net.wurstclient.util.text.WText;
 
@@ -97,13 +100,21 @@ public final class XRayHack extends Hack implements UpdateListener,
 			+ "Remember to restart X-Ray when changing this setting.",
 		0, 0, 0.99, 0.01, ValueDisplay.PERCENTAGE.withLabel(0, "off"));
 
+	private final ColorSetting skeletonColor = new ColorSetting("Skeleton color",
+		"Color of the terrain grid and silhouette in Skeleton style.",
+		new Color(0x00E676));
+
 	private final SliderSetting skeletonLineWidth = new SliderSetting(
 		"Skeleton line width",
-		"Thickness of the wireframe lines in Skeleton style, in pixels.\n\n"
-			+ "Higher values redraw the skeleton multiple times and cost more"
-			+ " GPU time.",
-		2, 1, 4, 1, ValueDisplay.INTEGER.withSuffix("px"));
-	
+		"Thickness of the terrain grid in Skeleton style, in pixels.", 2, 1,
+		8, 1, ValueDisplay.INTEGER.withSuffix("px"));
+
+	private final SliderSetting skeletonOutline = new SliderSetting(
+		"Skeleton outline",
+		"Thickness of silhouette outlines in Skeleton style, in pixels.\n\n"
+			+ "Set to 0 to disable silhouette outlines.",
+		2, 0, 4, 1, ValueDisplay.INTEGER.withSuffix("px"));
+
 	private final String optiFineWarning;
 	private final String renderName =
 		Math.random() < 0.01 ? "X-Wurst" : getName();
@@ -123,7 +134,9 @@ public final class XRayHack extends Hack implements UpdateListener,
 		addSetting(ores);
 		addSetting(onlyExposed);
 		addSetting(opacity);
+		addSetting(skeletonColor);
 		addSetting(skeletonLineWidth);
+		addSetting(skeletonOutline);
 		optiFineWarning = checkOptiFine();
 	}
 	
@@ -179,6 +192,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 		EVENTS.remove(ShouldDrawSideListener.class, this);
 		EVENTS.remove(RenderBlockEntityListener.class, this);
 		SodiumSkeletonRenderState.restoreDefaults();
+		SkeletonPostRenderer.close();
 
 		// reload chunks
 		MC.worldRenderer.reload();
@@ -207,6 +221,7 @@ public final class XRayHack extends Hack implements UpdateListener,
 		activeStyle = Style.NORMAL;
 		forceNormalWithoutOpacity = true;
 		SodiumSkeletonRenderState.restoreDefaults();
+		SkeletonPostRenderer.close();
 		ChatUtils.warning(irisWarning);
 		MC.worldRenderer.reload();
 	}
@@ -280,9 +295,19 @@ public final class XRayHack extends Hack implements UpdateListener,
 		return isVisible(block, null);
 	}
 
+	public Color getSkeletonColor()
+	{
+		return skeletonColor.getColor();
+	}
+
 	public int getSkeletonLineWidth()
 	{
 		return skeletonLineWidth.getValueI();
+	}
+
+	public int getSkeletonOutline()
+	{
+		return skeletonOutline.getValueI();
 	}
 
 	public boolean isOpacityMode()

@@ -22,7 +22,9 @@ Keep experimental/personal work separate from upstream-sized pull requests. Each
 
 ## X-Ray: Sodium-compatible surface skeleton mode
 
-**Status:** Live verified (MVP) — implemented on `feature/xray-skeleton-sodium` as build `7.50.3-tunnellerfix.1-xrayskeleton.1`; Arthur confirmed in-game on Aged that the front-surface wireframe works and rear outlines are hidden. Known follow-up: lines are 1px (macOS ignores GL line width) — thickness via multi-pass pixel jitter + slider is the next increment.
+**Status:** v1 live verified; v2 implemented and build verified — v2 replaces Sodium's textured `GL_LINE` pass with an offscreen depth prepass and solid-color fullscreen grid/outline shader. It removes triangle diagonals, supports 1–8px grid thickness and 0–4px silhouettes, and no longer writes invisible terrain depth into the main framebuffer. Live verification on Aged is still required.
+
+Known v2 live-test limitations: Indium/FRAPI custom-material terrain may bypass the CUTOUT routing used by this milestone, and the fullscreen outline pass may be expensive at Retina/4K resolution. Lowering or disabling the outline is the current performance control.
 
 ### Problem
 

@@ -14,9 +14,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import me.jellysquid.mods.sodium.client.gl.device.CommandList;
+import me.jellysquid.mods.sodium.client.gl.device.RenderDevice;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import me.jellysquid.mods.sodium.client.render.chunk.lists.ChunkRenderListIterable;
 import me.jellysquid.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
+import me.jellysquid.mods.sodium.client.render.chunk.vertex.format.ChunkVertexType;
 import me.jellysquid.mods.sodium.client.render.viewport.CameraTransform;
 import net.wurstclient.util.SodiumSkeletonRenderState;
 
@@ -26,6 +28,13 @@ import net.wurstclient.util.SodiumSkeletonRenderState;
 	remap = false)
 public class SodiumDefaultChunkRendererMixin
 {
+	@Inject(at = @At("RETURN"), method = "<init>", require = 0)
+	private void onConstructed(RenderDevice device, ChunkVertexType vertexType,
+		CallbackInfo ci)
+	{
+		SodiumSkeletonRenderState.markChunkRendererHookPresent();
+	}
+
 	@Inject(at = @At("HEAD"), method = "render", require = 0)
 	private void onRender(ChunkRenderMatrices matrices, CommandList commandList,
 		ChunkRenderListIterable renderLists, TerrainRenderPass pass,

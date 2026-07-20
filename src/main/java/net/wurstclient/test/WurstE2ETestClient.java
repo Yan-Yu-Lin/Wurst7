@@ -128,6 +128,7 @@ public final class WurstE2ETestClient implements ModInitializer
 		AutoMineHackTest.testAutoMineHack();
 		FreecamHackTest.testFreecamHack();
 		NoFallHackTest.testNoFallHack();
+		AntiHungerHackTest.testAntiHungerHack();
 		XRayHackTest.testXRayHack();
 		
 		// Test Wurst commands

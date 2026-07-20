@@ -47,7 +47,6 @@ public final class NoFallHack extends Hack implements UpdateListener
 	@Override
 	protected void onEnable()
 	{
-		WURST.getHax().antiHungerHack.setEnabled(false);
 		EVENTS.add(UpdateListener.class, this);
 	}
 	
@@ -74,9 +73,22 @@ public final class NoFallHack extends Hack implements UpdateListener
 		if(fallFlying && player.isSneaking()
 			&& !isFallingFastEnoughToCauseDamage(player))
 			return;
+			
+		// Let AntiHunger keep the server-side player airborne while ascending
+		// with Jetpack. Only spoof ground when fall damage is actually
+		// possible.
+		if(WURST.getHax().antiHungerHack.isEnabled()
+			&& !isFallDamagePossible(player))
+			return;
 		
 		// send packet to stop fall damage
 		player.networkHandler.sendPacket(new OnGroundOnly(true));
+	}
+	
+	private boolean isFallDamagePossible(ClientPlayerEntity player)
+	{
+		return player.fallDistance > 2
+			|| isFallingFastEnoughToCauseDamage(player);
 	}
 	
 	private boolean isFallingFastEnoughToCauseDamage(ClientPlayerEntity player)

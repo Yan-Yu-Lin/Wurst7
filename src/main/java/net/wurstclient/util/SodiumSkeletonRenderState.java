@@ -115,12 +115,15 @@ public enum SodiumSkeletonRenderState
 
 	private static void applyOrePhase()
 	{
+		// In Skeleton mode no terrain depth is written to the main
+		// framebuffer, so ordinary depth testing still lets ores show
+		// through walls while correctly occluding each other.
 		RenderSystem.disablePolygonOffset();
 		RenderSystem.polygonOffset(0, 0);
 		RenderSystem.polygonMode(GlConst.GL_FRONT_AND_BACK, GlConst.GL_FILL);
 		RenderSystem.enableDepthTest();
-		RenderSystem.depthFunc(GlConst.GL_ALWAYS);
-		RenderSystem.depthMask(false);
+		RenderSystem.depthFunc(GlConst.GL_LEQUAL);
+		RenderSystem.depthMask(true);
 		RenderSystem.colorMask(true, true, true, true);
 	}
 
